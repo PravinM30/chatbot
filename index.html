@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Career Chatbot — Local CPU</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.chat-container {
+  width: 100%;
+  max-width: 600px;
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  height: 90vh;
+  max-height: 700px;
+}
+
+/* Header */
+.header {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 20px;
+  border-radius: 20px 20px 0 0;
+  text-align: center;
+}
+
+.header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+
+.header .subtitle {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.status-dot.offline { background: #ef4444; }
+.status-dot.loading { background: #f59e0b; animation: pulse 1.5s infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Messages Area */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message.user {
+  flex-direction: row-reverse;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.message.bot .avatar {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+}
+
+.message.user .avatar {
+  background: #e0e7ff;
+  color: #4338ca;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.bubble {
+  max-width: 75%;
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.message.bot .bubble {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-top-left-radius: 4px;
+}
+
+.message.user .bubble {
+  background: #e0e7ff;
+  color: #312e81;
+  border-top-right-radius: 4px;
+}
+
+/* Typing indicator */
+.typing {
+  display: flex;
+  gap: 4px;
+  padding: 12px 16px;
+  background: #f1f5f9;
+  border-radius: 16px;
+  border-top-left-radius: 4px;
+  width: fit-content;
+}
+
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+  animation: bounce 1.4s infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-8px); }
+}
+
+/* Input Area */
+.input-area {
+  padding: 15px 20px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.text-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 24px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.text-input:focus {
+  border-color: #667eea;
+}
+
+.text-input:disabled {
+  background: #f8fafc;
+  cursor: not-allowed;
+}
+
+/* Mic Button */
+.mic-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.mic-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.mic-btn:active {
+  transform: scale(0.95);
+}
+
+.mic-btn.listening {
+  background: #ef4444;
+  animation: pulse-ring 1.5s infinite;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.mic-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mic-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* Send Button */
+.send-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.send-btn:hover {
+  transform: scale(1.05);
+}
+
+.send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Welcome message */
+.welcome {
+  text-align: center;
+  padding: 40px 20px;
+  color: #64748b;
+}
+
+.welcome h2 {
+  font-size: 18px;
+  margin-bottom: 8px;
+  color: #475569;
+}
+
+.welcome p {
+  font-size: 14px;
+}
+
+.hidden {
+  display: none !important;
+}
+</style>
+</head>
+<body>
+
+<div class="chat-container">
+  <!-- Header -->
+  <div class="header">
+    <h1>🎓 Voice Career Chatbot</h1>
+    <div class="subtitle">Local CPU • No GPU Required</div>
+    <div class="status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="messages" id="messages">
+    <div class="welcome">
+      <h2>👋 Welcome!</h2>
+      <p>I'm your AI career counselor. Click the mic or type to start chatting.</p>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="input-area">
+    <input 
+      type="text" 
+      class="text-input" 
+      id="text-input" 
+      placeholder="Type your message or use the mic..."
+      disabled
+    >
+    <button class="mic-btn" id="mic-btn" disabled title="Click to speak">
+      <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+        <path d="M19 10v2a7 7 0 01-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    </button>
+    <button class="send-btn" id="send-btn" disabled title="Send message">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════════════════════════════════
+
+const API_URL = 'https://pravin30994-chatbot.hf.space/docs';  // Backend URL
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════════════════
+
+let isRecording = false;
+let isSpeaking = false;
+let mediaRecorder = null;
+let audioChunks = [];
+let currentAudio = null;
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DOM ELEMENTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+const messagesEl = document.getElementById('messages');
+const textInput = document.getElementById('text-input');
+const micBtn = document.getElementById('mic-btn');
+const sendBtn = document.getElementById('send-btn');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INITIALIZATION
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function checkBackendStatus() {
+  try {
+    const response = await fetch(`${API_URL}/`);
+    if (response.ok) {
+      statusDot.className = 'status-dot';
+      statusText.textContent = 'Online';
+      textInput.disabled = false;
+      micBtn.disabled = false;
+      sendBtn.disabled = false;
+      return true;
+    } else {
+      throw new Error('Not OK');
+    }
+  } catch (error) {
+    statusDot.className = 'status-dot offline';
+    statusText.textContent = 'Backend offline';
+    console.error('Backend not reachable:', error);
+    return false;
+  }
+}
+
+// Check status on load
+checkBackendStatus();
+
+// Recheck every 5 seconds
+setInterval(checkBackendStatus, 5000);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MESSAGE RENDERING
+// ══════════════════════════════════════════════════════════════════════════════
+
+function addMessage(role, text) {
+  // Remove welcome message if exists
+  const welcome = messagesEl.querySelector('.welcome');
+  if (welcome) welcome.remove();
+
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `message ${role}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = role === 'bot' ? '🤖' : 'U';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+
+  msgDiv.appendChild(avatar);
+  msgDiv.appendChild(bubble);
+  messagesEl.appendChild(msgDiv);
+
+  // Scroll to bottom
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function showTyping() {
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'message bot';
+  typingDiv.id = 'typing-indicator';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = '🤖';
+
+  const typingBubble = document.createElement('div');
+  typingBubble.className = 'typing';
+  typingBubble.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+
+  typingDiv.appendChild(avatar);
+  typingDiv.appendChild(typingBubble);
+  messagesEl.appendChild(typingDiv);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function hideTyping() {
+  const typing = document.getElementById('typing-indicator');
+  if (typing) typing.remove();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// API CALLS
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function sendToSTT(audioBlob) {
+  const formData = new FormData();
+  formData.append('audio', audioBlob, 'recording.webm');
+
+  try {
+    const response = await fetch(`${API_URL}/api/stt`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) throw new Error('STT failed');
+
+    const data = await response.json();
+    return data.text;
+  } catch (error) {
+    console.error('STT error:', error);
+    addMessage('bot', '❌ Sorry, I couldn\'t understand the audio. Please try again.');
+    return null;
+  }
+}
+
+async function sendToLLM(userText) {
+  try {
+    const response = await fetch(`${API_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: userText }),
+    });
+
+    if (!response.ok) throw new Error('LLM failed');
+
+    const data = await response.json();
+    return data.reply;
+  } catch (error) {
+    console.error('LLM error:', error);
+    return '❌ Sorry, I encountered an error. Please try again.';
+  }
+}
+
+async function sendToTTS(text) {
+  try {
+    const response = await fetch(`${API_URL}/api/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!response.ok) throw new Error('TTS failed');
+
+    const blob = await response.blob();
+    return blob;
+  } catch (error) {
+    console.error('TTS error:', error);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUDIO PLAYBACK
+// ══════════════════════════════════════════════════════════════════════════════
+
+function playAudio(audioBlob) {
+  return new Promise((resolve) => {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+
+    isSpeaking = true;
+    setInputEnabled(false);
+
+    const url = URL.createObjectURL(audioBlob);
+    const audio = new Audio(url);
+    currentAudio = audio;
+
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      isSpeaking = false;
+      currentAudio = null;
+      setInputEnabled(true);
+      resolve();
+    };
+
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      isSpeaking = false;
+      currentAudio = null;
+      setInputEnabled(true);
+      resolve();
+    };
+
+    audio.play().catch(() => {
+      isSpeaking = false;
+      setInputEnabled(true);
+      resolve();
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN CONVERSATION FLOW
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function handleUserMessage(userText) {
+  if (!userText.trim()) return;
+
+  // Display user message
+  addMessage('user', userText);
+
+  // Show typing indicator
+  showTyping();
+
+  // Get bot response
+  const botReply = await sendToLLM(userText);
+
+  // Hide typing, show reply
+  hideTyping();
+  addMessage('bot', botReply);
+
+  // Speak the reply
+  const audioBlob = await sendToTTS(botReply);
+  if (audioBlob) {
+    await playAudio(audioBlob);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INPUT HANDLERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Text input
+sendBtn.addEventListener('click', () => {
+  const text = textInput.value.trim();
+  if (text) {
+    handleUserMessage(text);
+    textInput.value = '';
+  }
+});
+
+textInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    const text = textInput.value.trim();
+    if (text) {
+      handleUserMessage(text);
+      textInput.value = '';
+    }
+  }
+});
+
+// Microphone
+micBtn.addEventListener('click', async () => {
+  if (isSpeaking) {
+    alert('Please wait for the bot to finish speaking');
+    return;
+  }
+
+  if (isRecording) {
+    // Stop recording
+    mediaRecorder.stop();
+    return;
+  }
+
+  // Start recording
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    isRecording = true;
+    micBtn.classList.add('listening');
+    setInputEnabled(false);
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      isRecording = false;
+      micBtn.classList.remove('listening');
+      stream.getTracks().forEach(track => track.stop());
+
+      const audioBlob = new Blob(audioChunks, { type: mimeType });
+
+      // Send to STT
+      statusDot.className = 'status-dot loading';
+      statusText.textContent = 'Transcribing...';
+
+      const transcript = await sendToSTT(audioBlob);
+
+      statusDot.className = 'status-dot';
+      statusText.textContent = 'Online';
+
+      if (transcript) {
+        handleUserMessage(transcript);
+      } else {
+        setInputEnabled(true);
+      }
+    };
+
+    mediaRecorder.start(200);
+
+  } catch (error) {
+    console.error('Microphone error:', error);
+    alert('Microphone access denied. Please allow microphone access and try again.');
+    isRecording = false;
+    micBtn.classList.remove('listening');
+    setInputEnabled(true);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// UI STATE
+// ══════════════════════════════════════════════════════════════════════════════
+
+function setInputEnabled(enabled) {
+  textInput.disabled = !enabled;
+  sendBtn.disabled = !enabled;
+  micBtn.disabled = !enabled || isRecording;
+}
+</script>
+
+</body>
+</html>
