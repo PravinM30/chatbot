@@ -207,12 +207,7 @@
   .submit-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
   .submit-btn svg { width: 16px; height: 16px; }
 
-  /* ─── API URL CONFIG ─── */
-  .api-config { margin-top: 16px; padding: 12px 14px; background: #f9fafb; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
-  .api-config label { font-size: 11px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: .4px; display: block; margin-bottom: 6px; }
-  .api-config input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 12px; background: #fff; color: var(--text-main); outline: none; }
-  .api-config input:focus { border-color: var(--accent); }
-  .api-status-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--text-sub); }
+
 
   /* ─── REPORT SCREEN ─── */
   .report-scroll { flex: 1; overflow-y: auto; padding: 20px; }
@@ -346,18 +341,8 @@
         <textarea class="field-textarea" id="inp-interests" placeholder="What excites you outside school? Coding, sport, art, music…"></textarea>
       </div>
 
-      <!-- API URL config -->
-      <div class="api-config">
-        <label>Backend API URL</label>
-        <input type="text" id="inp-api-url" placeholder="https://your-space.hf.space" value="">
-        <div class="api-status-row">
-          <div class="status-dot" id="api-status-dot"></div>
-          <span id="api-status-text">Enter your Hugging Face Space URL above</span>
-        </div>
-      </div>
-
       <button class="submit-btn" id="btn-start">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 110 20 10 10 0 010-20zm0 0v20M2 12h20"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
         Start Voice Conversation
       </button>
     </div>
@@ -667,42 +652,9 @@ async function apiReportPDF(history) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   API URL INPUT & HEALTH CHECK
+   API BASE — hardcoded, change this to your HF Space URL
 ══════════════════════════════════════════════════════════ */
-let healthCheckTimer;
-$('inp-api-url').addEventListener('input', () => {
-  clearTimeout(healthCheckTimer);
-  const url = $('inp-api-url').value.trim().replace(/\/$/, '');
-  if (!url) { setApiStatus('idle'); return; }
-  API_BASE = url;
-  setApiStatus('loading', 'Checking connection…');
-  healthCheckTimer = setTimeout(checkHealth, 800);
-});
-
-async function checkHealth() {
-  try {
-    setApiStatus('loading', 'Connecting…');
-    const data = await apiHealth();
-    const models = data.models_loaded || [];
-    const allLoaded = models.includes('stt') && models.includes('llm') && models.includes('tts');
-    if (allLoaded) {
-      state.modelsLoaded = true;
-      setApiStatus('ok', `Connected · ${data.device} · All models ready`);
-    } else {
-      setApiStatus('ok', `Connected · Models loading: [${models.join(', ')}]`);
-    }
-  } catch(e) {
-    state.modelsLoaded = false;
-    setApiStatus('error', `Cannot reach backend: ${e.message}`);
-  }
-}
-
-function setApiStatus(type, msg) {
-  const dot  = $('api-status-dot');
-  const text = $('api-status-text');
-  dot.className  = 'status-dot' + (type === 'idle' ? '' : ` ${type}`);
-  text.textContent = msg || '';
-}
+API_BASE = 'https://YOUR-SPACE-URL.hf.space';  // ← PASTE YOUR URL HERE
 
 /* ══════════════════════════════════════════════════════════
    FORM SUBMIT
@@ -711,7 +663,6 @@ $('btn-start').addEventListener('click', async () => {
   const name  = $('inp-name').value.trim();
   const grade = $('inp-grade').value;
   const curr  = $('inp-curriculum').value;
-  const apiUrl = $('inp-api-url').value.trim().replace(/\/$/, '');
 
   if (!name || !grade || !curr) {
     [$('inp-name'), $('inp-grade'), $('inp-curriculum')].forEach(el => {
@@ -723,15 +674,7 @@ $('btn-start').addEventListener('click', async () => {
     showToast('Please fill in Name, Grade, and Curriculum.', 'error');
     return;
   }
-  if (!apiUrl) {
-    showToast('Please enter your Backend API URL.', 'error');
-    $('inp-api-url').focus();
-    return;
-  }
 
-  API_BASE = apiUrl;
-
-  // verify health one more time
   const btn = $('btn-start');
   btn.disabled = true;
   btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin-slow .8s linear infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Connecting…`;
@@ -741,7 +684,7 @@ $('btn-start').addEventListener('click', async () => {
   } catch(e) {
     showToast(`Cannot reach backend: ${e.message}`, 'error');
     btn.disabled = false;
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 110 20 10 10 0 010-20zm0 0v20M2 12h20"/></svg> Start Voice Conversation`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg> Start Voice Conversation`;
     return;
   }
 
@@ -1279,12 +1222,7 @@ $('btn-listen-instr').addEventListener('click', () => {
   }
 });
 
-// Pre-fill from URL params (useful for testing)
-const params = new URLSearchParams(window.location.search);
-if (params.get('api')) {
-  $('inp-api-url').value = params.get('api');
-  $('inp-api-url').dispatchEvent(new Event('input'));
-}
+
 </script>
 </body>
 </html>
