@@ -207,8 +207,6 @@
   .submit-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
   .submit-btn svg { width: 16px; height: 16px; }
 
-
-
   /* ─── REPORT SCREEN ─── */
   .report-scroll { flex: 1; overflow-y: auto; padding: 20px; }
   .report-scroll::-webkit-scrollbar { width: 5px; }
@@ -497,7 +495,14 @@
 /* ══════════════════════════════════════════════════════════
    CONFIG & STATE
 ══════════════════════════════════════════════════════════ */
-let API_BASE = '';  // Set by user in the form
+let API_BASE = 'https://multilinear-overtenaciously-timmy.ngrok-free.dev';
+
+// ─── NGROK HEADERS ───────────────────────────────────────
+// Bypasses the ngrok browser-warning interstitial page.
+// Without this, ngrok returns an HTML page instead of JSON.
+const NGROK_HEADERS = {
+  'ngrok-skip-browser-warning': 'true',
+};
 
 const PHASES = [
   { id:'welcome',     label:'Welcome',     title:'Information Capture',  badge:'Starting…' },
@@ -512,7 +517,7 @@ const PHASES = [
 const state = {
   student: {},
   phaseIdx: 0,
-  messages: [],      // [{role:'user'|'assistant', content:'...'}]
+  messages: [],
   notes: [],
   timerSec: 0,
   timerHandle: null,
@@ -550,11 +555,14 @@ function showScreen(name) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   API CALLS
+   API CALLS  — all include NGROK_HEADERS to skip interstitial
 ══════════════════════════════════════════════════════════ */
 async function apiHealth() {
-  const base = API_BASE.replace(/\/+$/, '');  // strip trailing slash
-  const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(8000) });
+  const base = API_BASE.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/health`, {
+    headers: { ...NGROK_HEADERS },
+    signal: AbortSignal.timeout(8000),
+  });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -574,7 +582,10 @@ async function apiLLM(messages, phase) {
   const base = API_BASE.replace(/\/+$/, '');
   const r = await fetch(`${base}/api/llm`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(120000),
   });
@@ -591,6 +602,7 @@ async function apiSTT(blob) {
   const base = API_BASE.replace(/\/+$/, '');
   const r = await fetch(`${base}/api/stt`, {
     method: 'POST',
+    headers: { ...NGROK_HEADERS },   // NOTE: no Content-Type — FormData sets it automatically
     body: fd,
     signal: AbortSignal.timeout(30000),
   });
@@ -605,7 +617,10 @@ async function apiTTS(text) {
   const base = API_BASE.replace(/\/+$/, '');
   const r = await fetch(`${base}/api/tts`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
+    },
     body: JSON.stringify({ text }),
     signal: AbortSignal.timeout(60000),
   });
@@ -627,7 +642,10 @@ async function apiReport(history) {
   const base = API_BASE.replace(/\/+$/, '');
   const r = await fetch(`${base}/api/report`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(180000),
   });
@@ -649,19 +667,16 @@ async function apiReportPDF(history) {
   const base = API_BASE.replace(/\/+$/, '');
   const r = await fetch(`${base}/api/report/pdf`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(180000),
   });
   if (!r.ok) throw new Error(`PDF error ${r.status}`);
   return r.blob();
 }
-
-/* ══════════════════════════════════════════════════════════
-   API BASE — paste your HF Space URL (no trailing slash)
-   Format:  https://username-spacename.hf.space
-══════════════════════════════════════════════════════════ */
-API_BASE = 'https://multilinear-overtenaciously-timmy.ngrok-free.dev';  // ← PASTE YOUR URL (no trailing slash!)
 
 /* ══════════════════════════════════════════════════════════
    FORM SUBMIT
@@ -707,7 +722,6 @@ $('btn-start').addEventListener('click', async () => {
   $('bc-name').textContent = name;
   $('chat-avatar').textContent   = state.student.initials;
   $('report-avatar').textContent = state.student.initials;
-  $('avatar') && ($('avatar').textContent = state.student.initials);
 
   showScreen('chat');
   initChat();
@@ -727,8 +741,6 @@ function initChat() {
   $('notes-scroll').innerHTML  = '<div style="text-align:center;padding:30px 10px;color:var(--text-light);font-size:12px;">Notes appear as the conversation progresses…</div>';
   $('word-count').textContent  = '0';
   updateChatStatus();
-
-  // Get first AI message from backend
   askLLM('welcome');
 }
 
@@ -793,19 +805,14 @@ async function askLLM(phaseId) {
     hideTypingIndicator(typingEl);
     const aiText = resp.reply || '';
 
-    // Add to message history
     state.messages.push({ role: 'assistant', content: aiText });
-
-    // Show AI bubble
     renderAIBubble(aiText, state.phaseIdx);
     updatePhaseDots();
 
-    // Extract & display insights
     if (resp.insights && Object.keys(resp.insights).length > 0) {
       addInsightNote(resp.insights, PHASES[state.phaseIdx]?.label || 'Session');
     }
 
-    // Speak the response via TTS
     speakText(aiText);
 
   } catch(e) {
@@ -852,7 +859,6 @@ async function speakText(text) {
   } catch(e) {
     state.isSpeaking = false;
     $('voice-vis').classList.add('hidden');
-    // TTS failure is non-fatal — the text is already displayed
     console.warn('TTS failed (non-fatal):', e.message);
   }
 }
@@ -872,7 +878,6 @@ async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    // Stop any current TTS playback
     if (state.currentAudio) { state.currentAudio.pause(); }
     $('voice-vis').classList.add('hidden');
 
@@ -902,7 +907,6 @@ async function startRecording() {
           $('chat-input').value = text;
           $('chat-input').placeholder = 'Type your response or use the mic…';
           $('chat-input').disabled = false;
-          // Auto-send after 800ms
           setTimeout(sendUserMessage, 800);
         } else {
           showToast('Could not hear anything. Please try again.', 'error');
@@ -945,27 +949,19 @@ async function sendUserMessage() {
   input.value = '';
   input.style.height = 'auto';
 
-  // Count words
   state.wordCount += text.trim().split(/\s+/).length;
   $('word-count').textContent = state.wordCount;
 
-  // Render user bubble
   renderUserBubble(text);
-
-  // Add to history
   state.messages.push({ role: 'user', content: text });
 
-  // Advance phase
   state.phaseIdx = Math.min(state.phaseIdx + 1, PHASES.length - 1);
 
-  // Enable report button after phase 3
   if (state.phaseIdx >= 3) $('btn-generate-report').disabled = false;
 
-  // Get next AI response
   const phaseId = PHASES[state.phaseIdx]?.id || 'summary';
   await askLLM(phaseId);
 
-  // End session after last phase
   if (state.phaseIdx >= PHASES.length - 1) {
     setTimeout(() => {
       $('btn-generate-report').disabled = false;
@@ -1045,8 +1041,8 @@ function scrollChat() {
 }
 
 function setInputEnabled(on) {
-  $('chat-input').disabled   = !on;
-  $('send-btn').disabled     = !on;
+  $('chat-input').disabled = !on;
+  $('send-btn').disabled   = !on;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1228,8 +1224,6 @@ $('btn-listen-instr').addEventListener('click', () => {
     window.speechSynthesis.speak(utt);
   }
 });
-
-
 </script>
 </body>
 </html>
