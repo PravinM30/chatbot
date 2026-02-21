@@ -560,7 +560,7 @@ function showScreen(name) {
 async function apiHealth() {
   const base = API_BASE.replace(/\/+$/, '');
   const r = await fetch(`${base}/api/health`, {
-    headers: { ...NGROK_HEADERS },
+     headers: { 'ngrok-skip-browser-warning': 'any' },
     signal: AbortSignal.timeout(8000),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -584,7 +584,7 @@ async function apiLLM(messages, phase) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...NGROK_HEADERS,
+      'ngrok-skip-browser-warning': 'any' 
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(120000),
@@ -602,7 +602,7 @@ async function apiSTT(blob) {
   const base = API_BASE.replace(/\/+$/, '');
   const r = await fetch(`${base}/api/stt`, {
     method: 'POST',
-    headers: { ...NGROK_HEADERS },   // NOTE: no Content-Type — FormData sets it automatically
+     headers: { 'ngrok-skip-browser-warning': 'any' },   // NOTE: no Content-Type — FormData sets it automatically
     body: fd,
     signal: AbortSignal.timeout(30000),
   });
@@ -619,7 +619,7 @@ async function apiTTS(text) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...NGROK_HEADERS,
+     'ngrok-skip-browser-warning': 'any'
     },
     body: JSON.stringify({ text }),
     signal: AbortSignal.timeout(60000),
@@ -644,7 +644,7 @@ async function apiReport(history) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...NGROK_HEADERS,
+       headers: { 'ngrok-skip-browser-warning': 'any' },
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(180000),
@@ -669,7 +669,7 @@ async function apiReportPDF(history) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...NGROK_HEADERS,
+       'ngrok-skip-browser-warning': 'any'
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(180000),
