@@ -379,7 +379,7 @@
     <div class="status-dot" id="chat-status-dot"></div>
     <span id="chat-status-text">Connecting…</span>
     <span class="status-sep">·</span>
-    <span id="chat-model-info">STT: distil-whisper/distil-large-v3 · : Llama-3.2-3B-Instruct · TTS: Kokoro-82M</span>
+    <span id="chat-model-info">STT: whisper-base · LLM: Qwen2.5-1.5B · TTS: SpeechT5</span>
   </div>
 
   <div class="main-content">
@@ -553,7 +553,8 @@ function showScreen(name) {
    API CALLS
 ══════════════════════════════════════════════════════════ */
 async function apiHealth() {
-  const r = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(8000) });
+  const base = API_BASE.replace(/\/+$/, '');  // strip trailing slash
+  const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -570,7 +571,8 @@ async function apiLLM(messages, phase) {
     messages,
     phase,
   };
-  const r = await fetch(`${API_BASE}/api/llm`, {
+  const base = API_BASE.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/llm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -586,7 +588,8 @@ async function apiLLM(messages, phase) {
 async function apiSTT(blob) {
   const fd = new FormData();
   fd.append('audio', blob, 'recording.webm');
-  const r = await fetch(`${API_BASE}/api/stt`, {
+  const base = API_BASE.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/stt`, {
     method: 'POST',
     body: fd,
     signal: AbortSignal.timeout(30000),
@@ -599,7 +602,8 @@ async function apiSTT(blob) {
 }
 
 async function apiTTS(text) {
-  const r = await fetch(`${API_BASE}/api/tts`, {
+  const base = API_BASE.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
@@ -620,7 +624,8 @@ async function apiReport(history) {
     },
     history,
   };
-  const r = await fetch(`${API_BASE}/api/report`, {
+  const base = API_BASE.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -641,7 +646,8 @@ async function apiReportPDF(history) {
     },
     history,
   };
-  const r = await fetch(`${API_BASE}/api/report/pdf`, {
+  const base = API_BASE.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/report/pdf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -655,7 +661,7 @@ async function apiReportPDF(history) {
    API BASE — paste your HF Space URL (no trailing slash)
    Format:  https://username-spacename.hf.space
 ══════════════════════════════════════════════════════════ */
-API_BASE ='https://multilinear-overtenaciously-timmy.ngrok-free.dev' 
+API_BASE = 'https://YOUR_NGROK_URL_HERE';  // ← PASTE YOUR URL (no trailing slash!)
 
 /* ══════════════════════════════════════════════════════════
    FORM SUBMIT
