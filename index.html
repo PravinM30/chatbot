@@ -870,64 +870,127 @@ $('mic-btn').addEventListener('click', async () => {
   if (state.isRecording) {
     stopRecording();
   } else {
-    startRecording();
+    await startRecording();
   }
 });
 
 async function startRecording() {
+  // Stop any TTS playback first
+  if (state.currentAudio) {
+    state.currentAudio.pause();
+    state.currentAudio = null;
+  }
+  $('voice-vis').classList.add('hidden');
+
+  // ── 1. Request mic with explicit quality constraints ─────────────────
+  let stream;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount:      1,          // mono
+        sampleRate:        { ideal: 16000 },
+        echoCancellation:  true,
+        noiseSuppression:  true,
+        autoGainControl:   true,
+      }
+    });
+  } catch (e) {
+    showToast('Microphone access denied. Please allow microphone in browser settings.', 'error');
+    return;
+  }
 
-    if (state.currentAudio) { state.currentAudio.pause(); }
-    $('voice-vis').classList.add('hidden');
+  // ── 2. Pick the best supported MIME type ─────────────────────────────
+  const MIME_PRIORITY = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+    '',   // browser default
+  ];
+  const mimeType = MIME_PRIORITY.find(m => !m || MediaRecorder.isTypeSupported(m)) || '';
+  console.log('[STT] Using mimeType:', mimeType || '(browser default)');
 
-    state.audioChunks = [];
-    const options = { mimeType: 'audio/webm' };
-    const mr = MediaRecorder.isTypeSupported('audio/webm')
-      ? new MediaRecorder(stream, options)
+  // ── 3. Create MediaRecorder with timeslice chunks ─────────────────────
+  state.audioChunks   = [];
+  state.recordingStart = Date.now();
+
+  let mr;
+  try {
+    mr = mimeType
+      ? new MediaRecorder(stream, { mimeType })
       : new MediaRecorder(stream);
+  } catch (e) {
+    mr = new MediaRecorder(stream);
+  }
+  state.mediaRecorder = mr;
 
-    state.mediaRecorder = mr;
+  mr.ondataavailable = e => {
+    if (e.data && e.data.size > 0) state.audioChunks.push(e.data);
+  };
 
-    mr.ondataavailable = e => {
-      if (e.data.size > 0) state.audioChunks.push(e.data);
-    };
+  // ── 4. Handle stop → send to STT ─────────────────────────────────────
+  mr.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    clearInterval(state.recordingTimer);
 
-    mr.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop());
-      const blob = new Blob(state.audioChunks, { type: mr.mimeType || 'audio/webm' });
+    const durationMs = Date.now() - state.recordingStart;
 
-      $('chat-input').placeholder = '🔄 Transcribing…';
-      $('chat-input').disabled = true;
+    // Guard: ignore clicks shorter than 1 second
+    if (durationMs < 1000) {
+      showToast('Recording too short — hold the mic button while speaking.', 'error');
+      $('chat-input').placeholder = 'Type your response or use the mic…';
+      $('chat-input').disabled = false;
+      resetMicBtn();
+      return;
+    }
 
-      try {
-        const result = await apiSTT(blob);
-        const text   = result.text || '';
-        if (text.trim()) {
-          $('chat-input').value = text;
-          $('chat-input').placeholder = 'Type your response or use the mic…';
-          $('chat-input').disabled = false;
-          setTimeout(sendUserMessage, 800);
-        } else {
-          showToast('Could not hear anything. Please try again.', 'error');
-          $('chat-input').placeholder = 'Type your response or use the mic…';
-          $('chat-input').disabled = false;
-        }
-      } catch(e) {
-        showToast(`Transcription failed: ${e.message}`, 'error');
+    // Determine file extension from MIME type for server-side format detection
+    const actualMime = mr.mimeType || mimeType || 'audio/webm';
+    const ext = mimeToExt(actualMime);
+    const blob = new Blob(state.audioChunks, { type: actualMime });
+
+    console.log(`[STT] blob: ${(blob.size/1024).toFixed(1)}KB  mime=${actualMime}  duration=${durationMs}ms`);
+
+    $('chat-input').placeholder = '🔄 Transcribing…';
+    $('chat-input').disabled = true;
+
+    try {
+      const result = await apiSTT(blob, ext);
+      const text   = (result.text || '').trim();
+
+      if (text) {
+        $('chat-input').value = text;
+        $('chat-input').placeholder = 'Type your response or use the mic…';
+        $('chat-input').disabled = false;
+        // Small delay so user can see the transcription before auto-send
+        setTimeout(sendUserMessage, 600);
+      } else {
+        showToast("Couldn't hear anything. Try speaking louder or closer to the mic.", 'error');
         $('chat-input').placeholder = 'Type your response or use the mic…';
         $('chat-input').disabled = false;
       }
-    };
+    } catch (e) {
+      showToast(`Transcription failed: ${e.message}`, 'error');
+      $('chat-input').placeholder = 'Type your response or use the mic…';
+      $('chat-input').disabled = false;
+    }
 
-    mr.start();
-    state.isRecording = true;
-    $('mic-btn').classList.add('recording');
-    $('chat-input').placeholder = '🎙 Recording… click mic to stop';
+    resetMicBtn();
+  };
 
-  } catch(e) {
-    showToast('Microphone access denied. Please allow microphone access.', 'error');
-  }
+  // ── 5. Start with 250ms timeslice so we get chunks progressively ──────
+  mr.start(250);
+  state.isRecording = true;
+  $('mic-btn').classList.add('recording');
+
+  // Show live duration counter
+  let secs = 0;
+  state.recordingTimer = setInterval(() => {
+    secs++;
+    $('chat-input').placeholder = `🎙 Recording ${secs}s… click mic to stop`;
+  }, 1000);
+  $('chat-input').placeholder = '🎙 Recording… click mic to stop';
 }
 
 function stopRecording() {
@@ -935,7 +998,43 @@ function stopRecording() {
     state.mediaRecorder.stop();
   }
   state.isRecording = false;
-  $('mic-btn').classList.remove('recording');
+  clearInterval(state.recordingTimer);
+  resetMicBtn();
+}
+
+function resetMicBtn() {
+  state.isRecording = false;
+  $('mic-btn').classList.remove('recording', 'listening');
+}
+
+// Map MIME type → file extension (so ffmpeg detects format correctly)
+function mimeToExt(mime) {
+  if (mime.includes('ogg'))  return 'ogg';
+  if (mime.includes('mp4'))  return 'mp4';
+  if (mime.includes('webm')) return 'webm';
+  if (mime.includes('wav'))  return 'wav';
+  return 'webm';   // safe default; ffmpeg will sniff the header anyway
+}
+
+// ── Updated apiSTT — sends correct filename extension ────────────────────
+async function apiSTT(blob, ext = 'webm') {
+  const fd = new FormData();
+  fd.append('audio', blob, `recording.${ext}`);   // ← correct extension!
+
+  const base = API_BASE.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/stt`, {
+    method:  'POST',
+    headers: { 'ngrok-skip-browser-warning': 'any' },
+    // ⚠️ Do NOT set Content-Type — FormData sets it with the boundary automatically
+    body:    fd,
+    signal:  AbortSignal.timeout(30000),
+  });
+
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`STT ${r.status}: ${err}`);
+  }
+  return r.json();
 }
 
 /* ══════════════════════════════════════════════════════════
