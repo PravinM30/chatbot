@@ -147,7 +147,6 @@
   .mic-btn-wrap.recording .mic-btn-ring { opacity: 1; filter: blur(5px); }
   .mic-btn-wrap.recording .mic-btn-core { background: #fff0f6; }
   .mic-btn-wrap.recording .mic-btn-core svg { color: var(--pink); }
-  .mic-btn-wrap:disabled { opacity: .5; cursor: not-allowed; }
 
   /* ─── NOTES PANEL ─── */
   .notes-panel { width: 260px; flex-shrink: 0; background: var(--surface); border-radius: var(--radius-lg); border: 1px solid var(--border); box-shadow: var(--shadow-md); display: flex; flex-direction: column; overflow: hidden; }
@@ -170,10 +169,6 @@
   .note-tag.pink { background: #fce7f3; color: #9d174d; }
   .note-tag.orange { background: #ffedd5; color: #9a3412; }
   .note-tag.blue { background: #dbeafe; color: #1e40af; }
-  .strength-bar-row { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
-  .strength-label { font-size: 10.5px; color: var(--text-sub); min-width: 70px; }
-  .strength-track { flex: 1; height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; }
-  .strength-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #5b8cff, #a78bfa); transition: width .6s ease; }
 
   /* ─── BOTTOM ACTION BAR ─── */
   .action-bar { display: flex; align-items: center; justify-content: flex-end; padding: 10px 20px; flex-shrink: 0; background: transparent; }
@@ -372,12 +367,11 @@
     </div>
   </div>
 
-  <!-- live status bar -->
   <div class="status-bar">
     <div class="status-dot" id="chat-status-dot"></div>
     <span id="chat-status-text">Connecting…</span>
     <span class="status-sep">·</span>
-    <span id="chat-model-info">STT: whisper-base · LLM: Qwen2.5-1.5B · TTS: SpeechT5</span>
+    <span id="chat-model-info">STT: distil-whisper · LLM: Llama-3.2-3B · TTS: Kokoro</span>
   </div>
 
   <div class="main-content">
@@ -488,7 +482,7 @@
   </div>
 </div>
 
-<!-- Toast notification -->
+<!-- Toast -->
 <div class="toast" id="toast"></div>
 
 <script>
@@ -497,21 +491,14 @@
 ══════════════════════════════════════════════════════════ */
 let API_BASE = 'https://multilinear-overtenaciously-timmy.ngrok-free.dev';
 
-// ─── NGROK HEADERS ───────────────────────────────────────
-// Bypasses the ngrok browser-warning interstitial page.
-// Without this, ngrok returns an HTML page instead of JSON.
-const NGROK_HEADERS = {
-  'ngrok-skip-browser-warning': 'true',
-};
-
 const PHASES = [
-  { id:'welcome',     label:'Welcome',     title:'Information Capture',  badge:'Starting…' },
-  { id:'interests',   label:'Interests',   title:'Exploring Interests',  badge:'1/6 answered' },
-  { id:'strengths',   label:'Strengths',   title:'Discovering Strengths',badge:'2/6 answered' },
-  { id:'preferences', label:'Preferences', title:'Work Preferences',     badge:'3/6 answered' },
-  { id:'scenarios',   label:'Scenarios',   title:'Career Scenarios',     badge:'4/6 answered' },
-  { id:'refinement',  label:'Refinement',  title:'Narrowing Down',       badge:'5/6 answered' },
-  { id:'summary',     label:'Summary',     title:'Wrapping Up',          badge:'6/6 answered' },
+  { id:'welcome',     label:'Welcome',     title:'Information Capture',   badge:'Starting…'    },
+  { id:'interests',   label:'Interests',   title:'Exploring Interests',   badge:'1/6 answered' },
+  { id:'strengths',   label:'Strengths',   title:'Discovering Strengths', badge:'2/6 answered' },
+  { id:'preferences', label:'Preferences', title:'Work Preferences',      badge:'3/6 answered' },
+  { id:'scenarios',   label:'Scenarios',   title:'Career Scenarios',      badge:'4/6 answered' },
+  { id:'refinement',  label:'Refinement',  title:'Narrowing Down',        badge:'5/6 answered' },
+  { id:'summary',     label:'Summary',     title:'Wrapping Up',           badge:'6/6 answered' },
 ];
 
 const state = {
@@ -521,26 +508,28 @@ const state = {
   notes: [],
   timerSec: 0,
   timerHandle: null,
+  recordingTimer: null,
+  recordingStart: null,
   wordCount: 0,
   isRecording: false,
   isSpeaking: false,
   mediaRecorder: null,
   audioChunks: [],
   currentAudio: null,
-  modelsLoaded: false,
 };
 
 /* ══════════════════════════════════════════════════════════
    HELPERS
 ══════════════════════════════════════════════════════════ */
 const $ = id => document.getElementById(id);
+
 function escHtml(t) {
   return String(t)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
 
-function showToast(msg, type='error', duration=4000) {
+function showToast(msg, type = 'error', duration = 4000) {
   const t = $('toast');
   t.textContent = msg;
   t.className = `toast ${type} show`;
@@ -548,19 +537,25 @@ function showToast(msg, type='error', duration=4000) {
   t._hide = setTimeout(() => { t.className = 'toast'; }, duration);
 }
 
-const screens = { form: $('screen-form'), chat: $('screen-chat'), report: $('screen-report') };
+const screens = {
+  form:   $('screen-form'),
+  chat:   $('screen-chat'),
+  report: $('screen-report'),
+};
 function showScreen(name) {
   Object.values(screens).forEach(s => s.classList.remove('active'));
   screens[name].classList.add('active');
 }
 
 /* ══════════════════════════════════════════════════════════
-   API CALLS  — all include NGROK_HEADERS to skip interstitial
+   API
 ══════════════════════════════════════════════════════════ */
+const BASE = () => API_BASE.replace(/\/+$/, '');
+const SKIP = { 'ngrok-skip-browser-warning': 'any' };
+
 async function apiHealth() {
-  const base = API_BASE.replace(/\/+$/, '');
-  const r = await fetch(`${base}/api/health`, {
-     headers: { 'ngrok-skip-browser-warning': 'any' },
+  const r = await fetch(`${BASE()}/api/health`, {
+    headers: SKIP,
     signal: AbortSignal.timeout(8000),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -568,121 +563,96 @@ async function apiHealth() {
 }
 
 async function apiLLM(messages, phase) {
-  const body = {
-    student: {
-      name:       state.student.name,
-      grade:      state.student.grade,
-      curriculum: state.student.curriculum,
-      subjects:   state.student.subjects || '',
-      interests:  state.student.interests || '',
-    },
-    messages,
-    phase,
-  };
-  const base = API_BASE.replace(/\/+$/, '');
-  const r = await fetch(`${base}/api/llm`, {
+  const r = await fetch(`${BASE()}/api/llm`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'any' 
-    },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', ...SKIP },
+    body: JSON.stringify({
+      student: {
+        name:       state.student.name,
+        grade:      state.student.grade,
+        curriculum: state.student.curriculum,
+        subjects:   state.student.subjects  || '',
+        interests:  state.student.interests || '',
+      },
+      messages,
+      phase,
+    }),
     signal: AbortSignal.timeout(120000),
   });
-  if (!r.ok) {
-    const err = await r.text();
-    throw new Error(`LLM error ${r.status}: ${err}`);
-  }
+  if (!r.ok) throw new Error(`LLM ${r.status}: ${await r.text()}`);
   return r.json();
 }
 
-async function apiSTT(blob) {
+/* ── STT — sends blob with correct file extension ────────── */
+async function apiSTT(blob, ext = 'webm') {
   const fd = new FormData();
-  fd.append('audio', blob, 'recording.webm');
-  const base = API_BASE.replace(/\/+$/, '');
-  const r = await fetch(`${base}/api/stt`, {
-    method: 'POST',
-     headers: { 'ngrok-skip-browser-warning': 'any' },   // NOTE: no Content-Type — FormData sets it automatically
-    body: fd,
-    signal: AbortSignal.timeout(30000),
+  fd.append('audio', blob, `recording.${ext}`);  // extension helps ffmpeg detect format
+  const r = await fetch(`${BASE()}/api/stt`, {
+    method:  'POST',
+    headers: SKIP,   // NO Content-Type — FormData sets it with boundary automatically
+    body:    fd,
+    signal:  AbortSignal.timeout(30000),
   });
-  if (!r.ok) {
-    const err = await r.text();
-    throw new Error(`STT error ${r.status}: ${err}`);
-  }
+  if (!r.ok) throw new Error(`STT ${r.status}: ${await r.text()}`);
   return r.json();
 }
 
 async function apiTTS(text) {
-  const base = API_BASE.replace(/\/+$/, '');
-  const r = await fetch(`${base}/api/tts`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-     'ngrok-skip-browser-warning': 'any'
-    },
-    body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(60000),
+  const r = await fetch(`${BASE()}/api/tts`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', ...SKIP },
+    body:    JSON.stringify({ text }),
+    signal:  AbortSignal.timeout(60000),
   });
-  if (!r.ok) throw new Error(`TTS error ${r.status}`);
+  if (!r.ok) throw new Error(`TTS ${r.status}`);
   return r.blob();
 }
 
 async function apiReport(history) {
-  const body = {
-    student: {
-      name:       state.student.name,
-      grade:      state.student.grade,
-      curriculum: state.student.curriculum,
-      subjects:   state.student.subjects || '',
-      interests:  state.student.interests || '',
-    },
-    history,
-  };
-  const base = API_BASE.replace(/\/+$/, '');
-  const r = await fetch(`${base}/api/report`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-       headers: { 'ngrok-skip-browser-warning': 'any' },
-    },
-    body: JSON.stringify(body),
+  const r = await fetch(`${BASE()}/api/report`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', ...SKIP },
+    body:    JSON.stringify({
+      student: {
+        name:       state.student.name,
+        grade:      state.student.grade,
+        curriculum: state.student.curriculum,
+        subjects:   state.student.subjects  || '',
+        interests:  state.student.interests || '',
+      },
+      history,
+    }),
     signal: AbortSignal.timeout(180000),
   });
-  if (!r.ok) throw new Error(`Report error ${r.status}`);
+  if (!r.ok) throw new Error(`Report ${r.status}`);
   return r.json();
 }
 
 async function apiReportPDF(history) {
-  const body = {
-    student: {
-      name:       state.student.name,
-      grade:      state.student.grade,
-      curriculum: state.student.curriculum,
-      subjects:   state.student.subjects || '',
-      interests:  state.student.interests || '',
-    },
-    history,
-  };
-  const base = API_BASE.replace(/\/+$/, '');
-  const r = await fetch(`${base}/api/report/pdf`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-       'ngrok-skip-browser-warning': 'any'
-    },
-    body: JSON.stringify(body),
+  const r = await fetch(`${BASE()}/api/report/pdf`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', ...SKIP },
+    body:    JSON.stringify({
+      student: {
+        name:       state.student.name,
+        grade:      state.student.grade,
+        curriculum: state.student.curriculum,
+        subjects:   state.student.subjects  || '',
+        interests:  state.student.interests || '',
+      },
+      history,
+    }),
     signal: AbortSignal.timeout(180000),
   });
-  if (!r.ok) throw new Error(`PDF error ${r.status}`);
+  if (!r.ok) throw new Error(`PDF ${r.status}`);
   return r.blob();
 }
 
 /* ══════════════════════════════════════════════════════════
-   FORM SUBMIT
+   FORM
 ══════════════════════════════════════════════════════════ */
 $('btn-start').addEventListener('click', async () => {
-  const name  = $('inp-name').value.trim();
+  const name = $('inp-name').value.trim();
   const grade = $('inp-grade').value;
   const curr  = $('inp-curriculum').value;
 
@@ -699,29 +669,32 @@ $('btn-start').addEventListener('click', async () => {
 
   const btn = $('btn-start');
   btn.disabled = true;
-  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin-slow .8s linear infinite"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Connecting…`;
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    style="animation:spin-slow .8s linear infinite"><circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/></svg> Connecting…`;
 
   try {
     await apiHealth();
   } catch(e) {
     showToast(`Cannot reach backend: ${e.message}`, 'error');
     btn.disabled = false;
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg> Start Voice Conversation`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+      <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg> Start Voice Conversation`;
     return;
   }
 
   state.student = {
-    name,
-    grade,
+    name, grade,
     curriculum: curr,
     subjects:   $('inp-subjects').value.trim(),
     interests:  $('inp-interests').value.trim(),
-    initials:   name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
+    initials:   name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase(),
   };
 
-  $('bc-name').textContent = name;
-  $('chat-avatar').textContent   = state.student.initials;
-  $('report-avatar').textContent = state.student.initials;
+  $('bc-name').textContent         = name;
+  $('chat-avatar').textContent     = state.student.initials;
+  $('report-avatar').textContent   = state.student.initials;
 
   showScreen('chat');
   initChat();
@@ -740,15 +713,9 @@ function initChat() {
   $('messages-area').innerHTML = '';
   $('notes-scroll').innerHTML  = '<div style="text-align:center;padding:30px 10px;color:var(--text-light);font-size:12px;">Notes appear as the conversation progresses…</div>';
   $('word-count').textContent  = '0';
-  updateChatStatus();
+  $('chat-status-dot').className = 'status-dot ok';
+  $('chat-status-text').textContent = `Connected · ${API_BASE}`;
   askLLM('welcome');
-}
-
-function updateChatStatus() {
-  const dot  = $('chat-status-dot');
-  const text = $('chat-status-text');
-  dot.className  = 'status-dot ok';
-  text.textContent = `Connected to ${API_BASE}`;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -759,8 +726,8 @@ function startTimer() {
   clearInterval(state.timerHandle);
   state.timerHandle = setInterval(() => {
     state.timerSec++;
-    const m = String(Math.floor(state.timerSec/60)).padStart(2,'0');
-    const s = String(state.timerSec%60).padStart(2,'0');
+    const m = String(Math.floor(state.timerSec / 60)).padStart(2,'0');
+    const s = String(state.timerSec % 60).padStart(2,'0');
     $('chat-timer').textContent = `${m}:${s}`;
   }, 1000);
 }
@@ -771,7 +738,7 @@ function startTimer() {
 function buildPhaseDots() {
   const wrap = $('phase-dots');
   wrap.innerHTML = '';
-  PHASES.forEach((p,i) => {
+  PHASES.forEach((p, i) => {
     const d = document.createElement('div');
     d.className = 'phase-dot';
     d.id = `dot-${i}`;
@@ -781,20 +748,20 @@ function buildPhaseDots() {
 }
 
 function updatePhaseDots() {
-  PHASES.forEach((_,i) => {
+  PHASES.forEach((_, i) => {
     const d = $(`dot-${i}`);
     if (!d) return;
     d.classList.remove('done','active');
-    if (i < state.phaseIdx) d.classList.add('done');
+    if (i < state.phaseIdx)      d.classList.add('done');
     else if (i === state.phaseIdx) d.classList.add('active');
   });
-  const ph = PHASES[Math.min(state.phaseIdx, PHASES.length-1)];
+  const ph = PHASES[Math.min(state.phaseIdx, PHASES.length - 1)];
   $('conv-title-text').textContent  = ph.title;
   $('conv-phase-badge').textContent = ph.badge;
 }
 
 /* ══════════════════════════════════════════════════════════
-   LLM INTERACTION
+   LLM
 ══════════════════════════════════════════════════════════ */
 async function askLLM(phaseId) {
   const typingEl = showTypingIndicator();
@@ -804,17 +771,13 @@ async function askLLM(phaseId) {
     const resp = await apiLLM(state.messages, phaseId);
     hideTypingIndicator(typingEl);
     const aiText = resp.reply || '';
-
     state.messages.push({ role: 'assistant', content: aiText });
     renderAIBubble(aiText, state.phaseIdx);
     updatePhaseDots();
-
     if (resp.insights && Object.keys(resp.insights).length > 0) {
       addInsightNote(resp.insights, PHASES[state.phaseIdx]?.label || 'Session');
     }
-
     speakText(aiText);
-
   } catch(e) {
     hideTypingIndicator(typingEl);
     showToast(`AI response failed: ${e.message}`, 'error');
@@ -826,25 +789,21 @@ async function askLLM(phaseId) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   TTS PLAYBACK
+   TTS
 ══════════════════════════════════════════════════════════ */
 async function speakText(text) {
   if (!text || text.length < 3) return;
   try {
     $('voice-vis').classList.remove('hidden');
     state.isSpeaking = true;
-
     const blob = await apiTTS(text.slice(0, 400));
     const url  = URL.createObjectURL(blob);
-
     if (state.currentAudio) {
       state.currentAudio.pause();
       URL.revokeObjectURL(state.currentAudio.src);
     }
-
     const audio = new Audio(url);
     state.currentAudio = audio;
-
     audio.onended = () => {
       state.isSpeaking = false;
       $('voice-vis').classList.add('hidden');
@@ -854,80 +813,137 @@ async function speakText(text) {
       state.isSpeaking = false;
       $('voice-vis').classList.add('hidden');
     };
-
     await audio.play();
   } catch(e) {
     state.isSpeaking = false;
     $('voice-vis').classList.add('hidden');
-    console.warn('TTS failed (non-fatal):', e.message);
+    console.warn('TTS (non-fatal):', e.message);
   }
 }
 
 /* ══════════════════════════════════════════════════════════
-   STT (MICROPHONE)
+   STT — IMPROVED MICROPHONE RECORDING
 ══════════════════════════════════════════════════════════ */
 $('mic-btn').addEventListener('click', async () => {
   if (state.isRecording) {
     stopRecording();
   } else {
-    startRecording();
+    await startRecording();
   }
 });
 
 async function startRecording() {
+  // Stop any TTS that is playing
+  if (state.currentAudio) {
+    state.currentAudio.pause();
+    state.currentAudio = null;
+  }
+  $('voice-vis').classList.add('hidden');
+
+  // ── 1. Request mic with explicit quality constraints ──────────────────
+  let stream;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount:     1,              // mono
+        sampleRate:       { ideal: 16000 },
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl:  true,
+      }
+    });
+  } catch(e) {
+    showToast('Microphone access denied. Please allow microphone in browser settings.', 'error');
+    return;
+  }
 
-    if (state.currentAudio) { state.currentAudio.pause(); }
-    $('voice-vis').classList.add('hidden');
+  // ── 2. Choose best supported MIME type ───────────────────────────────
+  const MIME_PRIORITY = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+    '',
+  ];
+  const mimeType = MIME_PRIORITY.find(m => !m || MediaRecorder.isTypeSupported(m)) || '';
+  console.log('[STT] mimeType:', mimeType || '(browser default)');
 
-    state.audioChunks = [];
-    const options = { mimeType: 'audio/webm' };
-    const mr = MediaRecorder.isTypeSupported('audio/webm')
-      ? new MediaRecorder(stream, options)
-      : new MediaRecorder(stream);
+  // ── 3. Set up MediaRecorder with 250ms chunks ─────────────────────────
+  state.audioChunks    = [];
+  state.recordingStart = Date.now();
 
-    state.mediaRecorder = mr;
+  let mr;
+  try {
+    mr = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  } catch(e) {
+    mr = new MediaRecorder(stream);
+  }
+  state.mediaRecorder = mr;
 
-    mr.ondataavailable = e => {
-      if (e.data.size > 0) state.audioChunks.push(e.data);
-    };
+  mr.ondataavailable = e => {
+    if (e.data && e.data.size > 0) state.audioChunks.push(e.data);
+  };
 
-    mr.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop());
-      const blob = new Blob(state.audioChunks, { type: mr.mimeType || 'audio/webm' });
+  mr.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    clearInterval(state.recordingTimer);
 
-      $('chat-input').placeholder = '🔄 Transcribing…';
-      $('chat-input').disabled = true;
+    const durationMs = Date.now() - state.recordingStart;
 
-      try {
-        const result = await apiSTT(blob);
-        const text   = result.text || '';
-        if (text.trim()) {
-          $('chat-input').value = text;
-          $('chat-input').placeholder = 'Type your response or use the mic…';
-          $('chat-input').disabled = false;
-          setTimeout(sendUserMessage, 800);
-        } else {
-          showToast('Could not hear anything. Please try again.', 'error');
-          $('chat-input').placeholder = 'Type your response or use the mic…';
-          $('chat-input').disabled = false;
-        }
-      } catch(e) {
-        showToast(`Transcription failed: ${e.message}`, 'error');
+    // ── Guard: reject accidental taps < 1 second ──────────────────────
+    if (durationMs < 1000) {
+      showToast('Recording too short — hold the mic button while speaking.', 'error');
+      $('chat-input').placeholder = 'Type your response or use the mic…';
+      $('chat-input').disabled = false;
+      resetMicBtn();
+      return;
+    }
+
+    const actualMime = mr.mimeType || mimeType || 'audio/webm';
+    const ext  = mimeToExt(actualMime);
+    const blob = new Blob(state.audioChunks, { type: actualMime });
+
+    console.log(`[STT] blob: ${(blob.size/1024).toFixed(1)}KB  mime=${actualMime}  ext=${ext}  duration=${durationMs}ms`);
+
+    $('chat-input').placeholder = '🔄 Transcribing…';
+    $('chat-input').disabled = true;
+
+    try {
+      const result = await apiSTT(blob, ext);
+      const text   = (result.text || '').trim();
+
+      if (text) {
+        $('chat-input').value = text;
+        $('chat-input').placeholder = 'Type your response or use the mic…';
+        $('chat-input').disabled = false;
+        setTimeout(sendUserMessage, 600);
+      } else {
+        showToast("Couldn't hear anything clearly. Try speaking louder or closer to the mic.", 'error');
         $('chat-input').placeholder = 'Type your response or use the mic…';
         $('chat-input').disabled = false;
       }
-    };
+    } catch(e) {
+      showToast(`Transcription failed: ${e.message}`, 'error');
+      $('chat-input').placeholder = 'Type your response or use the mic…';
+      $('chat-input').disabled = false;
+    }
 
-    mr.start();
-    state.isRecording = true;
-    $('mic-btn').classList.add('recording');
-    $('chat-input').placeholder = '🎙 Recording… click mic to stop';
+    resetMicBtn();
+  };
 
-  } catch(e) {
-    showToast('Microphone access denied. Please allow microphone access.', 'error');
-  }
+  // ── 4. Start recording with 250ms timeslice ───────────────────────────
+  mr.start(250);
+  state.isRecording = true;
+  $('mic-btn').classList.add('recording');
+
+  // Live duration counter
+  let secs = 0;
+  state.recordingTimer = setInterval(() => {
+    secs++;
+    $('chat-input').placeholder = `🎙 Recording ${secs}s… click mic to stop`;
+  }, 1000);
+  $('chat-input').placeholder = '🎙 Recording… click mic to stop';
 }
 
 function stopRecording() {
@@ -935,7 +951,21 @@ function stopRecording() {
     state.mediaRecorder.stop();
   }
   state.isRecording = false;
-  $('mic-btn').classList.remove('recording');
+  clearInterval(state.recordingTimer);
+  resetMicBtn();
+}
+
+function resetMicBtn() {
+  state.isRecording = false;
+  $('mic-btn').classList.remove('recording', 'listening');
+}
+
+function mimeToExt(mime) {
+  if (mime.includes('ogg'))  return 'ogg';
+  if (mime.includes('mp4'))  return 'mp4';
+  if (mime.includes('webm')) return 'webm';
+  if (mime.includes('wav'))  return 'wav';
+  return 'webm';
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -954,7 +984,6 @@ async function sendUserMessage() {
 
   renderUserBubble(text);
   state.messages.push({ role: 'user', content: text });
-
   state.phaseIdx = Math.min(state.phaseIdx + 1, PHASES.length - 1);
 
   if (state.phaseIdx >= 3) $('btn-generate-report').disabled = false;
@@ -994,7 +1023,6 @@ function renderAIBubble(text, phaseIdx) {
       </div>
     </div>
     <div class="bubble ai">${qLabel}${escHtml(text)}</div>`;
-
   area.appendChild(row);
   scrollChat();
 }
@@ -1046,11 +1074,10 @@ function setInputEnabled(on) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   INSIGHTS → NOTES PANEL
+   NOTES PANEL
 ══════════════════════════════════════════════════════════ */
 function addInsightNote(insights, phaseLabel) {
   const scroll = $('notes-scroll');
-
   if (state.notes.length === 0) scroll.innerHTML = '';
 
   const lines = [];
@@ -1058,13 +1085,13 @@ function addInsightNote(insights, phaseLabel) {
   if (insights.lifestyle)          lines.push(`Lifestyle: ${insights.lifestyle}`);
   if (insights.interests_detected) lines.push('Interests clearly expressed');
   if (insights.strengths_detected) lines.push('Strengths mentioned');
-  if (lines.length === 0) return;
+  if (!lines.length) return;
 
   state.notes.push({ phase: phaseLabel, lines });
-  $('notes-count').textContent = `${state.notes.length} insight${state.notes.length>1?'s':''}`;
+  $('notes-count').textContent = `${state.notes.length} insight${state.notes.length > 1 ? 's' : ''}`;
 
   const tags = [];
-  if (insights.work_orientation) insights.work_orientation.forEach(o => tags.push({ text: o, cls: 'blue' }));
+  if (insights.work_orientation)   insights.work_orientation.forEach(o => tags.push({ text: o, cls: 'blue' }));
   if (insights.interests_detected) tags.push({ text: '🎯 Interests', cls: 'green' });
   if (insights.strengths_detected) tags.push({ text: '💪 Strengths', cls: '' });
 
@@ -1074,34 +1101,31 @@ function addInsightNote(insights, phaseLabel) {
     <div class="note-phase"><span class="note-phase-dot"></span>${phaseLabel}</div>
     <div class="note-label">AI Insight</div>
     <div class="note-value">${lines.join(' · ')}</div>
-    ${tags.length ? `<div class="note-tags">${tags.map(t=>`<span class="note-tag ${t.cls}">${t.text}</span>`).join('')}</div>` : ''}`;
+    ${tags.length ? `<div class="note-tags">${tags.map(t => `<span class="note-tag ${t.cls}">${t.text}</span>`).join('')}</div>` : ''}`;
   scroll.appendChild(card);
   scroll.scrollTop = scroll.scrollHeight;
 }
 
 /* ══════════════════════════════════════════════════════════
-   GENERATE REPORT
+   REPORT
 ══════════════════════════════════════════════════════════ */
 $('btn-generate-report').addEventListener('click', async () => {
   showScreen('report');
   const grid = $('report-grid');
   grid.innerHTML = `<div class="report-loading"><div class="spin-ring"></div><span>Generating your personalised career report…</span></div>`;
-
   try {
     const data = await apiReport(state.messages);
-    const rpt  = data.report;
-    renderReport(rpt, data.student || state.student);
+    renderReport(data.report, data.student || state.student);
   } catch(e) {
-    grid.innerHTML = `<div class="report-loading" style="grid-column:1/-1">
-      <span style="color:#f87171">⚠ Report generation failed: ${escHtml(e.message)}</span>
-      <button onclick="showScreen('chat')" style="margin-top:12px;padding:8px 18px;background:var(--accent);color:#fff;border:none;border-radius:20px;cursor:pointer;font-size:13px;">← Back to Chat</button>
-    </div>`;
+    grid.innerHTML = `<div class="report-loading">
+      <span style="color:#f87171">⚠ Report failed: ${escHtml(e.message)}</span>
+      <button onclick="showScreen('chat')"
+        style="margin-top:12px;padding:8px 18px;background:var(--accent);color:#fff;border:none;border-radius:20px;cursor:pointer;font-size:13px;">
+        ← Back to Chat
+      </button></div>`;
   }
 });
 
-/* ══════════════════════════════════════════════════════════
-   RENDER REPORT
-══════════════════════════════════════════════════════════ */
 function renderReport(rpt, stu) {
   const grid = $('report-grid');
   grid.innerHTML = '';
@@ -1172,8 +1196,8 @@ function renderReport(rpt, stu) {
 $('btn-dl-pdf').addEventListener('click', async () => {
   const btn = $('btn-dl-pdf');
   btn.disabled = true;
-  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin-slow .8s linear infinite"><circle cx="12" cy="12" r="10"/></svg> Generating PDF…`;
-
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    style="animation:spin-slow .8s linear infinite"><circle cx="12" cy="12" r="10"/></svg> Generating PDF…`;
   try {
     const blob = await apiReportPDF(state.messages);
     const url  = URL.createObjectURL(blob);
@@ -1189,12 +1213,13 @@ $('btn-dl-pdf').addEventListener('click', async () => {
     showToast(`PDF failed: ${e.message}`, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Download PDF`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Download PDF`;
   }
 });
 
 /* ══════════════════════════════════════════════════════════
-   TEXT INPUT EVENTS
+   TEXT INPUT
 ══════════════════════════════════════════════════════════ */
 $('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUserMessage(); }
@@ -1209,7 +1234,7 @@ $('send-btn').addEventListener('click', sendUserMessage);
    MISC UI
 ══════════════════════════════════════════════════════════ */
 $('read-more-toggle').addEventListener('click', () => {
-  const list = document.querySelector('.instructions-list');
+  const list  = document.querySelector('.instructions-list');
   const shown = list.style.display !== 'none';
   list.style.display = shown ? 'none' : '';
   $('read-more-toggle').textContent = shown ? '▾ Read more' : '▴ Collapse';
